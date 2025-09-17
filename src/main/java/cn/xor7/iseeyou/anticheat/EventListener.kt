@@ -3,6 +3,10 @@ package cn.xor7.iseeyou.anticheat
 import cn.xor7.iseeyou.utils.InstantReplayManager
 import cn.xor7.iseeyou.highSpeedPausedPhotographers
 import cn.xor7.iseeyou.photographers
+import cn.xor7.iseeyou.recordingFiles
+import cn.xor7.iseeyou.recordingStartTimes
+import cn.xor7.iseeyou.instance
+import org.bukkit.scheduler.BukkitRunnable
 import cn.xor7.iseeyou.toml
 import org.bukkit.Bukkit
 import org.bukkit.event.EventHandler
@@ -24,6 +28,7 @@ import kotlin.math.pow
  */
 object EventListener : Listener {
     val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd@HH-mm-ss")
+    val FILENAME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss")
     var pauseRecordingOnHighSpeedThresholdPerTickSquared = 0.00
 
     /**
@@ -78,6 +83,9 @@ object EventListener : Listener {
         recordFile.createNewFile()
         photographer.setRecordFile(recordFile)
 
+        recordingFiles[playerUniqueId] = recordFile
+        recordingStartTimes[playerUniqueId] = currentTime
+
         photographers[playerUniqueId] = photographer
         photographer.setFollowPlayer(player)
     }
@@ -120,7 +128,19 @@ object EventListener : Listener {
             photographer.resumeRecording()
         } else {
             photographer.stopRecording(toml!!.data.asyncSave)
+            val oldFile = recordingFiles[player.uniqueId.toString()]
+            val startTime = recordingStartTimes[player.uniqueId.toString()]
+            if (oldFile != null && startTime != null) {
+                object : BukkitRunnable() {
+                    override fun run() {
+                        val newName = "${startTime.format(FILENAME_FORMATTER)}.mcpr"
+                        oldFile.renameTo(File(oldFile.parent, newName))
+                    }
+                }.runTaskLater(instance!!, 20)
+            }
             photographers.remove(player.uniqueId.toString())
+            recordingFiles.remove(player.uniqueId.toString())
+            recordingStartTimes.remove(player.uniqueId.toString())
         }
     }
 }

@@ -15,7 +15,7 @@ public class TomlEx<T> extends Toml {
     private final Class<T> clazz;
     public T data;
 
-    public TomlEx(String filePath, Class<T> clazz) {
+    public TomlEx(String filePath, Class<T> clazz, T defaultConfig) {
         super();
         this.clazz = clazz;
         file = new File(filePath);
@@ -25,6 +25,7 @@ public class TomlEx<T> extends Toml {
                 if (!file.createNewFile()) {
                     throw new IOException("Can not create file: " + filePath);
                 }
+                tomlWriter.write(defaultConfig, file);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }

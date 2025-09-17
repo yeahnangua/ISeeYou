@@ -15,6 +15,7 @@ data class ConfigData(
     var bStats: Boolean = true,
     var recorderNamePrefix: String = "",
     var check_for_updates: Boolean = true,
+    var autoSave: AutoSaveConfig = AutoSaveConfig(),
 ) {
     fun isConfigValid(): String? {
         if ("name" != filter.checkBy && "uuid" != filter.checkBy) {
@@ -88,4 +89,9 @@ data class InstantReplayConfig(
     var replayMinutes: Int = 5,
     var createMinutes: Int = 1,
     var recordPath: String = "replay/instant/\${name}@\${uuid}",
+)
+
+data class AutoSaveConfig(
+    var enabled: Boolean = false,
+    var interval: Int = 15,
 )

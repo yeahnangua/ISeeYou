@@ -39,6 +39,8 @@ import kotlin.math.pow
 
 var toml: TomlEx<ConfigData>? = null
 var photographers = mutableMapOf<String, Photographer>()
+var recordingStartTimes = mutableMapOf<String, LocalDateTime>()
+var recordingFiles = mutableMapOf<String, File>()
 var highSpeedPausedPhotographers = mutableSetOf<Photographer>()
 var instance: JavaPlugin? = null
 
@@ -92,6 +94,71 @@ class ISeeYou : JavaPlugin(), CommandExecutor {
                 object : BukkitRunnable() {
                     override fun run() = cleanOutdatedRecordings()
                 }.runTaskTimer(this, 0, 20 * 60 * 60 * interval.toLong())
+            }
+            
+
+            if (toml!!.data.autoSave.enabled) {
+                val interval = toml!!.data.autoSave.interval
+                                object : BukkitRunnable() {
+                    override fun run() {
+                        val now = LocalDateTime.now()
+                        for ((uuid, photographer) in photographers.toMap()) {
+                            val player = Bukkit.getPlayer(UUID.fromString(uuid))
+                            if (player == null) {
+                                continue
+                            }
+
+                            val oldFile = recordingFiles[uuid] ?: continue
+                            val startTime = recordingStartTimes[uuid] ?: continue
+
+                            photographer.stopRecording(toml!!.data.asyncSave)
+
+                            // Schedule the renaming of the old file
+                            object : BukkitRunnable() {
+                                override fun run() {
+                                    val newName = "${startTime.format(EventListener.FILENAME_FORMATTER)}.mcpr"
+                                    oldFile.renameTo(File(oldFile.parent, newName))
+                                }
+                            }.runTaskLater(instance!!, 20)
+
+                            // Create a new photographer for the new recording
+                            val newStartTime = LocalDateTime.now()
+                            var prefix = player.name
+                            if (prefix.startsWith(".")) { // fix Floodgate
+                                prefix = prefix.replace(".", "_")
+                            }
+                            prefix = toml!!.data.recorderNamePrefix + prefix
+                            if (prefix.length > 10) {
+                                prefix = prefix.substring(0, 10)
+                            }
+                            val newPhotographer = Bukkit
+                                .getPhotographerManager()
+                                .createPhotographer(
+                                    (prefix + "_" + UUID.randomUUID().toString().replace("-", "")).substring(0, 16),
+                                    player.location
+                                )
+                            if (newPhotographer == null) {
+                                continue
+                            }
+
+                            val recordPath: String = toml!!.data.recordPath
+                                .replace("\${name}", player.name)
+                                .replace("\${uuid}", player.uniqueId.toString())
+                            File(recordPath).mkdirs()
+                            val newFile = File(recordPath, newStartTime.format(EventListener.DATE_FORMATTER) + ".mcpr")
+                            try {
+                                newFile.createNewFile()
+                                newPhotographer.setRecordFile(newFile)
+                                newPhotographer.setFollowPlayer(player)
+                                photographers[uuid] = newPhotographer // Replace old photographer with the new one
+                                recordingFiles[uuid] = newFile
+                                recordingStartTimes[uuid] = newStartTime
+                            } catch (e: IOException) {
+                                logError("Error creating new file for auto-save: ${e.message}")
+                            }
+                        }
+                    }
+                }.runTaskTimer(this, 0, 20 * 60 * interval.toLong())
             }
 
             Bukkit.getPluginManager().registerEvents(EventListener, this)
@@ -204,6 +271,20 @@ class ISeeYou : JavaPlugin(), CommandExecutor {
                             return@anyExecutor
                         }
                         photographers[uuid]?.stopRecording(toml!!.data.asyncSave)
+                        val oldFile = recordingFiles[uuid]
+                        val startTime = recordingStartTimes[uuid]
+                        if (oldFile != null && startTime != null) {
+                            object : BukkitRunnable() {
+                                override fun run() {
+                                    val newName = "${startTime.format(EventListener.FILENAME_FORMATTER)}.mcpr"
+                                    oldFile.renameTo(File(oldFile.parent, newName))
+                                }
+                            }.runTaskLater(instance!!, 20)
+                        }
+                        photographers.remove(uuid)
+                        commandPhotographersNameUUIDMap.remove(name)
+                        recordingFiles.remove(uuid)
+                        recordingStartTimes.remove(uuid)
                         sender.sendMessage("成功移除摄像机：$name")
                     }
                 }
@@ -248,10 +329,12 @@ class ISeeYou : JavaPlugin(), CommandExecutor {
         if (recordFile.exists()) recordFile.delete()
         recordFile.createNewFile()
         photographer.setRecordFile(recordFile)
+        recordingFiles[uuid] = recordFile
+        recordingStartTimes[uuid] = currentTime
     }
 
     private fun setupConfig() {
-        toml = TomlEx("plugins/ISeeYou/config.toml", ConfigData::class.java)
+        toml = TomlEx("plugins/ISeeYou/config.toml", ConfigData::class.java, ConfigData())
         val errMsg = toml!!.data.isConfigValid()
         if (errMsg != null) {
             throw InvalidConfigurationException(errMsg)
@@ -329,33 +412,38 @@ class ISeeYou : JavaPlugin(), CommandExecutor {
                     .forEach { file ->
                         fileCount++
                         val fileName = file.fileName.toString()
-                        val creationDateStr = fileName.substringBefore('@')
-                        val creationDate = LocalDate.parse(creationDateStr)
-                        val daysSinceCreation = Duration.between(creationDate.atStartOfDay(), currentDate.atStartOfDay()).toDays()
-                        if (daysSinceCreation > outdatedRecordRetentionDays) {
-                            val executor = Executors.newSingleThreadExecutor()
-                            val future = executor.submit(Callable {
-                                try {
-                                    Files.delete(file)
-                                    logInfo("删除了记录文件: $fileName")
-                                    true
-                                } catch (e: IOException) {
-                                    logSevere("删除记录文件时出错: $fileName, 错误: ${e.message}")
-                                    e.printStackTrace()
-                                    false
-                                }
-                            })
+                        if (fileName.length < 10) return@forEach
+                        val creationDateStr = fileName.substring(0, 10)
+                        try {
+                            val creationDate = LocalDate.parse(creationDateStr)
+                            val daysSinceCreation = Duration.between(creationDate.atStartOfDay(), currentDate.atStartOfDay()).toDays()
+                            if (daysSinceCreation > outdatedRecordRetentionDays) {
+                                val executor = Executors.newSingleThreadExecutor()
+                                val future = executor.submit(Callable {
+                                    try {
+                                        Files.delete(file)
+                                        logInfo("删除了记录文件: $fileName")
+                                        true
+                                    } catch (e: IOException) {
+                                        logSevere("删除记录文件时出错: $fileName, 错误: ${e.message}")
+                                        e.printStackTrace()
+                                        false
+                                    }
+                                })
 
-                            try {
-                                if (future.get(2, TimeUnit.SECONDS)) {
-                                    deletedCount++
+                                try {
+                                    if (future.get(2, TimeUnit.SECONDS)) {
+                                        deletedCount++
+                                    }
+                                } catch (e: TimeoutException) {
+                                    logWarning("删除文件超时: $fileName. 跳过此文件...")
+                                    future.cancel(true)
+                                } finally {
+                                    executor.shutdown()
                                 }
-                            } catch (e: TimeoutException) {
-                                logWarning("删除文件超时: $fileName. 跳过此文件...")
-                                future.cancel(true)
-                            } finally {
-                                executor.shutdown()
                             }
+                        } catch (e: Exception) {
+                            logWarning("无法从文件名解析日期: $fileName, 错误: ${e.message}")
                         }
                     }
             }
@@ -371,8 +459,14 @@ class ISeeYou : JavaPlugin(), CommandExecutor {
 
     override fun onDisable() {
         CommandAPI.onDisable()
-        for (photographer in photographers.values) {
+        for ((uuid, photographer) in photographers) {
             photographer.stopRecording(toml!!.data.asyncSave)
+            val oldFile = recordingFiles[uuid]
+            val startTime = recordingStartTimes[uuid]
+            if (oldFile != null && startTime != null) {
+                val newName = "${startTime.format(EventListener.FILENAME_FORMATTER)}.mcpr"
+                oldFile.renameTo(File(oldFile.parent, newName))
+            }
         }
         photographers.clear()
         highSpeedPausedPhotographers.clear()
