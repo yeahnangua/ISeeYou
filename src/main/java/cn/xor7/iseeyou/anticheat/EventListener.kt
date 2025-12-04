@@ -51,18 +51,10 @@ object EventListener : Listener {
         if (toml!!.data.instantReplay.enabled) {
             InstantReplayManager.watch(player)
         }
-        var prefix = player.name
-        if (prefix.startsWith(".")) { // fix Floodgate
-            prefix = prefix.replace(".", "_")
-        }
-        prefix = toml!!.data.recorderNamePrefix + prefix
-        if (prefix.length > 10) {
-            prefix = prefix.substring(0, 10)
-        }
         val photographer = Bukkit
             .getPhotographerManager()
             .createPhotographer(
-                (prefix + "_" + UUID.randomUUID().toString().replace("-".toRegex(), "")).substring(0, 16),
+                (player.name.take(11) + "_CCTV"),
                 player.location
             )
         if (photographer == null) {

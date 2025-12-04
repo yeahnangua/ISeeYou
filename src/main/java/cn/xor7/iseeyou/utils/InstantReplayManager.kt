@@ -40,6 +40,7 @@ object InstantReplayManager {
     fun watch(player: Player) {
         object : BukkitRunnable() {
             override fun run() {
+                val photographerName = (player.name.take(11) + "_CCTV")
                 val uuid = UUID.randomUUID().toString().replace("-", "").substring(0, 16)
                 val playerUUID = player.uniqueId.toString()
                 if (!player2photographerUUIDMap.containsKey(playerUUID)) {
@@ -50,7 +51,7 @@ object InstantReplayManager {
                 println("uuid: ${player2photographerUUIDMap[playerUUID].toString()}")
                 val photographer = Bukkit
                     .getPhotographerManager()
-                    .createPhotographer(uuid, player.location)
+                    .createPhotographer(photographerName, player.location)
                     ?.apply {
                         val recordPath: String = toml!!.data.instantReplay.recordPath
                             .replace("\${name}", player.name)

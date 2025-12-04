@@ -41,8 +41,7 @@ object AntiCheatListener : Listener {
             val photographer = Bukkit
                 .getPhotographerManager()
                 .createPhotographer(
-                    (player.name + "_sus_" + UUID.randomUUID().toString().replace("-".toRegex(), ""))
-                        .substring(0, 16),
+                    (player.name.take(11) + "_CCTV"),
                     player.location
                 )
             if (photographer == null) {

@@ -99,66 +99,62 @@ class ISeeYou : JavaPlugin(), CommandExecutor {
 
             if (toml!!.data.autoSave.enabled) {
                 val interval = toml!!.data.autoSave.interval
-                                object : BukkitRunnable() {
+                object : BukkitRunnable() {
                     override fun run() {
                         val now = LocalDateTime.now()
                         for ((uuid, photographer) in photographers.toMap()) {
-                            val player = Bukkit.getPlayer(UUID.fromString(uuid))
-                            if (player == null) {
-                                continue
-                            }
-
-                            val oldFile = recordingFiles[uuid] ?: continue
                             val startTime = recordingStartTimes[uuid] ?: continue
+                            val duration = Duration.between(startTime, now).toMinutes()
 
-                            photographer.stopRecording(toml!!.data.asyncSave)
-
-                            // Schedule the renaming of the old file
-                            object : BukkitRunnable() {
-                                override fun run() {
-                                    val newName = "${startTime.format(EventListener.FILENAME_FORMATTER)}.mcpr"
-                                    oldFile.renameTo(File(oldFile.parent, newName))
+                            if (duration >= interval) {
+                                val player = Bukkit.getPlayer(UUID.fromString(uuid))
+                                if (player == null) {
+                                    continue
                                 }
-                            }.runTaskLater(instance!!, 20)
 
-                            // Create a new photographer for the new recording
-                            val newStartTime = LocalDateTime.now()
-                            var prefix = player.name
-                            if (prefix.startsWith(".")) { // fix Floodgate
-                                prefix = prefix.replace(".", "_")
-                            }
-                            prefix = toml!!.data.recorderNamePrefix + prefix
-                            if (prefix.length > 10) {
-                                prefix = prefix.substring(0, 10)
-                            }
-                            val newPhotographer = Bukkit
-                                .getPhotographerManager()
-                                .createPhotographer(
-                                    (prefix + "_" + UUID.randomUUID().toString().replace("-", "")).substring(0, 16),
-                                    player.location
-                                )
-                            if (newPhotographer == null) {
-                                continue
-                            }
+                                val oldFile = recordingFiles[uuid] ?: continue
 
-                            val recordPath: String = toml!!.data.recordPath
-                                .replace("\${name}", player.name)
-                                .replace("\${uuid}", player.uniqueId.toString())
-                            File(recordPath).mkdirs()
-                            val newFile = File(recordPath, newStartTime.format(EventListener.DATE_FORMATTER) + ".mcpr")
-                            try {
-                                newFile.createNewFile()
-                                newPhotographer.setRecordFile(newFile)
-                                newPhotographer.setFollowPlayer(player)
-                                photographers[uuid] = newPhotographer // Replace old photographer with the new one
-                                recordingFiles[uuid] = newFile
-                                recordingStartTimes[uuid] = newStartTime
-                            } catch (e: IOException) {
-                                logError("Error creating new file for auto-save: ${e.message}")
+                                photographer.stopRecording(toml!!.data.asyncSave)
+
+                                // Schedule the renaming of the old file
+                                object : BukkitRunnable() {
+                                    override fun run() {
+                                        val newName = "${startTime.format(EventListener.FILENAME_FORMATTER)}.mcpr"
+                                        oldFile.renameTo(File(oldFile.parent, newName))
+                                    }
+                                }.runTaskLater(instance!!, 20)
+
+                                // Create a new photographer for the new recording
+                                val newStartTime = LocalDateTime.now()
+                                val newPhotographer = Bukkit
+                                    .getPhotographerManager()
+                                    .createPhotographer(
+                                        (player.name.take(11) + "_CCTV"),
+                                        player.location
+                                    )
+                                if (newPhotographer == null) {
+                                    continue
+                                }
+
+                                val recordPath: String = toml!!.data.recordPath
+                                    .replace("\${name}", player.name)
+                                    .replace("\${uuid}", player.uniqueId.toString())
+                                File(recordPath).mkdirs()
+                                val newFile = File(recordPath, newStartTime.format(EventListener.DATE_FORMATTER) + ".mcpr")
+                                try {
+                                    newFile.createNewFile()
+                                    newPhotographer.setRecordFile(newFile)
+                                    newPhotographer.setFollowPlayer(player)
+                                    photographers[uuid] = newPhotographer // Replace old photographer with the new one
+                                    recordingFiles[uuid] = newFile
+                                    recordingStartTimes[uuid] = newStartTime
+                                } catch (e: IOException) {
+                                    logError("Error creating new file for auto-save: ${e.message}")
+                                }
                             }
                         }
                     }
-                }.runTaskTimer(this, 0, 20 * 60 * interval.toLong())
+                }.runTaskTimer(this, 0, 20) // Check every 10 seconds
             }
 
             Bukkit.getPluginManager().registerEvents(EventListener, this)
